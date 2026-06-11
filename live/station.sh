@@ -2,6 +2,8 @@
 # station.sh - Wipe station for Raspberry Pi 4
 # Split screen, hot-swap, GPIO buttons, auto-update
 
+VERSION="1.0.0"
+
 STATION_URL="https://raw.githubusercontent.com/painteau/wipe/main/live/station.sh"
 STATION_BIN="/usr/local/bin/wipe-station.sh"
 UPDATE_TIMEOUT=7   # seconds before giving up on network
@@ -24,12 +26,31 @@ DIM='\033[2m'
 BOLD='\033[1m'
 NC='\033[0m'
 
+# --- Version comparison: returns 0 if $1 > $2
+version_gt() {
+    [ "$(printf '%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ] && [ "$1" != "$2" ]
+}
+
 # --- Self-update with countdown
 self_update() {
+    clear
+    echo -e "${CYAN}"
+    echo "  ██╗    ██╗██╗██████╗ ███████╗"
+    echo "  ██║    ██║██║██╔══██╗██╔════╝"
+    echo "  ██║ █╗ ██║██║██████╔╝█████╗  "
+    echo "  ██║███╗██║██║██╔═══╝ ██╔══╝  "
+    echo "  ╚███╔███╔╝██║██║     ███████╗ "
+    echo "   ╚══╝╚══╝ ╚═╝╚═╝     ╚══════╝"
+    echo -e "${NC}"
+    echo -e "  ${DIM}Wipe Station  v${VERSION}${NC}"
+    echo -e "  ${DIM}$(date '+%Y-%m-%d %H:%M:%S')${NC}"
     echo ""
+    echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+
     local i=$UPDATE_TIMEOUT
     while [ $i -gt 0 ]; do
-        printf "  \033[2mChecking for updates... %ds\033[0m\r" "$i"
+        printf "  \033[2mChecking for updates... (v%s) %ds\033[0m\r" "$VERSION" "$i"
         sleep 1
         i=$(( i - 1 ))
     done
@@ -42,24 +63,30 @@ self_update() {
     local CURL_EXIT=$?
 
     if [ $CURL_EXIT -ne 0 ] || [ ! -s "$tmp" ]; then
-        echo -e "  ${DIM}No network — using local version.${NC}"
+        echo -e "  ${DIM}No network — running v${VERSION} (local).${NC}"
         rm -f "$tmp"
         sleep 1
         return
     fi
 
-    local remote_hash local_hash
-    remote_hash=$(sha256sum "$tmp" | cut -d' ' -f1)
-    local_hash=$(sha256sum "$STATION_BIN" 2>/dev/null | cut -d' ' -f1)
+    local remote_version
+    remote_version=$(grep '^VERSION=' "$tmp" | head -1 | cut -d'"' -f2)
 
-    if [ "$remote_hash" != "$local_hash" ]; then
-        echo -e "  ${YELLOW}[~] Update found, applying...${NC}"
+    if [ -z "$remote_version" ]; then
+        echo -e "  ${DIM}Could not read remote version — running v${VERSION}.${NC}"
+        rm -f "$tmp"
+        sleep 1
+        return
+    fi
+
+    if version_gt "$remote_version" "$VERSION"; then
+        echo -e "  ${YELLOW}[~] Update: v${VERSION} -> v${remote_version} — applying...${NC}"
         mv "$tmp" "$STATION_BIN"
         chmod +x "$STATION_BIN"
         sleep 1
         exec "$STATION_BIN"
     else
-        echo -e "  ${GREEN}[✓] Up to date.${NC}"
+        echo -e "  ${GREEN}[✓] v${VERSION} — up to date.${NC}"
         rm -f "$tmp"
         sleep 1
     fi
@@ -109,7 +136,7 @@ wipe_slot() {
 
         echo -e "${CYAN}"
         [ "$SLOT" = "1" ] && echo "  SLOT 1 (LEFT)" || echo "  SLOT 2 (RIGHT)"
-        echo -e "${NC}"
+        echo -e "  ${DIM}v${VERSION}${NC}"
         echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
 
