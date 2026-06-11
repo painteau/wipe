@@ -18,6 +18,16 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# --- Prevent sleep/suspend during wipe
+INHIBIT_PID=""
+if command -v systemd-inhibit &>/dev/null; then
+    systemd-inhibit --what=sleep:idle:handle-suspend-key:handle-lid-switch \
+        --who="wipe.sh" --why="Disk wipe in progress" --mode=block \
+        sleep infinity &
+    INHIBIT_PID=$!
+fi
+trap '[ -n "$INHIBIT_PID" ] && kill "$INHIBIT_PID" 2>/dev/null' EXIT
+
 # --- Header
 clear
 echo -e "${CYAN}"
