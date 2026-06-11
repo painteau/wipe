@@ -16,7 +16,7 @@ use slot::SlotHandle;
 fn main() -> anyhow::Result<()> {
     update::check_and_update();
 
-    // Désactiver blanking écran TTY
+    // Disable TTY screen blanking
     #[cfg(target_os = "linux")]
     {
         use std::io::Write;
@@ -55,7 +55,7 @@ fn spawn_reboot_watchdog(pin_a: u8, pin_b: u8) {
                     let _ = std::process::Command::new("sudo")
                         .args(["reboot"])
                         .spawn();
-                    // Attendre le reboot système
+                    // Wait for system reboot
                     thread::sleep(Duration::from_secs(60));
                 }
             } else {

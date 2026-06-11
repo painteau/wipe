@@ -31,7 +31,7 @@ pub fn render(frame: &mut Frame, states: &[SlotState]) {
 fn render_header(frame: &mut Frame, area: Rect) {
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
     let line = Line::from(Span::styled(
-        format!("  WIPE STATION v{}  |  {}  |  [2 boutons 10s = reboot]", VERSION, now),
+        format!("  WIPE STATION v{}  |  {}  |  [hold both 10s = reboot]", VERSION, now),
         Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
     ));
     frame.render_widget(
@@ -45,7 +45,7 @@ fn render_header(frame: &mut Frame, area: Rect) {
 fn render_slot(frame: &mut Frame, area: Rect, id: usize, state: &SlotState) {
     let label = format!(" SLOT {} ", id);
     let (color, lines): (Color, Vec<Line<'static>>) = match state {
-        SlotState::WaitingForDisk       => (Color::DarkGray, lines_waiting()),
+        SlotState::WaitingForDisk        => (Color::DarkGray, lines_waiting()),
         SlotState::SsdRejected { model } => (Color::Red,      lines_ssd(model)),
         SlotState::Ready(info)           => (Color::Yellow,   lines_ready(info)),
         SlotState::Wiping { info, progress } => (Color::Cyan, lines_wiping(info, progress)),
@@ -66,7 +66,7 @@ fn lines_waiting() -> Vec<Line<'static>> {
         Line::from(""),
         Line::from(""),
         Line::from(Span::styled(
-            "  En attente d'un disque HDD...",
+            "  Waiting for a HDD...",
             Style::default().fg(Color::DarkGray),
         )),
     ]
@@ -76,11 +76,11 @@ fn lines_ssd(model: &str) -> Vec<Line<'static>> {
     vec![
         Line::from(""),
         Line::from(Span::styled(
-            format!("  [!] SSD detecte : {}", model),
+            format!("  [!] SSD detected: {}", model),
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "  HDD uniquement. Retirer le disque.",
+            "  HDD only. Remove the disk.",
             Style::default().fg(Color::DarkGray),
         )),
     ]
@@ -90,7 +90,7 @@ fn lines_ready(info: &DiskInfo) -> Vec<Line<'static>> {
     let mut lines = disk_header(info, Color::Yellow);
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  > Appuyer sur le bouton pour demarrer <",
+        "  > Press the button to start <",
         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
     )));
     lines
@@ -127,11 +127,11 @@ fn lines_done(info: &DiskInfo, elapsed_secs: u64) -> Vec<Line<'static>> {
     lines.extend(defrag_grid(total, total, Color::Green, Color::Green));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        format!("  [OK] TERMINE  {}  en {}", info.size_str, fmt_duration(elapsed_secs)),
+        format!("  [OK] DONE  {}  in {}", info.size_str, fmt_duration(elapsed_secs)),
         Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(Span::styled(
-        "  Retirer le disque.",
+        "  Remove the disk.",
         Style::default().fg(Color::DarkGray),
     )));
     lines
@@ -141,7 +141,7 @@ fn lines_error(message: &str) -> Vec<Line<'static>> {
     vec![
         Line::from(""),
         Line::from(Span::styled(
-            "  [!!] ERREUR",
+            "  [!!] ERROR",
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
@@ -150,7 +150,7 @@ fn lines_error(message: &str) -> Vec<Line<'static>> {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "  Retirer le disque pour reessayer.",
+            "  Remove the disk to retry.",
             Style::default().fg(Color::DarkGray),
         )),
     ]
@@ -159,19 +159,19 @@ fn lines_error(message: &str) -> Vec<Line<'static>> {
 fn disk_header(info: &DiskInfo, accent: Color) -> Vec<Line<'static>> {
     vec![
         Line::from(vec![
-            Span::styled("  Modele : ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  Model  : ", Style::default().fg(Color::DarkGray)),
             Span::styled(info.model.clone(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
-            Span::styled("  Serie  : ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  Serial : ", Style::default().fg(Color::DarkGray)),
             Span::styled(info.serial.clone(), Style::default().fg(Color::White)),
         ]),
         Line::from(vec![
-            Span::styled("  Taille : ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  Size   : ", Style::default().fg(Color::DarkGray)),
             Span::styled(info.size_str.clone(), Style::default().fg(accent).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
-            Span::styled("  Estime : ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  Est.   : ", Style::default().fg(Color::DarkGray)),
             Span::styled(format!("~{}", info.eta_str), Style::default().fg(Color::DarkGray)),
         ]),
     ]

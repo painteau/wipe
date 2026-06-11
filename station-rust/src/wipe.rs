@@ -33,7 +33,7 @@ pub fn wipe_device(
                 p.speed_bps = if secs > 0.1 { written as f64 / secs } else { 0.0 };
                 p.elapsed_secs = secs as u64;
             }
-            Err(e) if e.raw_os_error() == Some(28) => break, // ENOSPC = disque plein = done
+            Err(e) if e.raw_os_error() == Some(28) => break, // ENOSPC = disk full = wipe complete
             Err(e) => return Err(e.to_string()),
         }
     }

@@ -28,34 +28,32 @@ pub fn check_and_update() {
     };
 
     if !is_newer(&remote, CURRENT_VERSION) {
-        println!("  \x1b[32m[OK] v{} — a jour.\x1b[0m", CURRENT_VERSION);
+        println!("  \x1b[32m[OK] v{} -- up to date.\x1b[0m", CURRENT_VERSION);
         std::thread::sleep(Duration::from_secs(1));
         return;
     }
 
-    println!("  \x1b[33m[~] v{} disponible — telechargement...\x1b[0m", remote);
+    println!("  \x1b[33m[~] v{} available -- downloading...\x1b[0m", remote);
 
     let tmp = "/tmp/wipe-station-update";
 
-    // Download
     let mut resp = match client.get(BINARY_URL).send() {
         Ok(r) => r,
-        Err(e) => { eprintln!("  Erreur: {}", e); sleep_short(); return; }
+        Err(e) => { eprintln!("  Error: {}", e); sleep_short(); return; }
     };
     let mut out = match std::fs::File::create(tmp) {
         Ok(f) => f,
-        Err(e) => { eprintln!("  Erreur: {}", e); sleep_short(); return; }
+        Err(e) => { eprintln!("  Error: {}", e); sleep_short(); return; }
     };
     if let Err(e) = std::io::copy(&mut resp, &mut out) {
-        eprintln!("  Erreur download: {}", e); sleep_short(); return;
+        eprintln!("  Download error: {}", e); sleep_short(); return;
     }
     drop(out);
 
-    // Verify sha256
     let expected = match client.get(SHA256_URL).send().and_then(|r| r.text()) {
         Ok(t) => t.split_whitespace().next().unwrap_or("").to_string(),
         Err(_) => {
-            println!("  \x1b[31m[!] sha256 indisponible — update bloque.\x1b[0m");
+            println!("  \x1b[31m[!] SHA256 unavailable -- update blocked.\x1b[0m");
             std::fs::remove_file(tmp).ok();
             sleep_short();
             return;
@@ -64,19 +62,18 @@ pub fn check_and_update() {
     let data = std::fs::read(tmp).unwrap_or_default();
     let actual = hex::encode(Sha256::digest(&data));
     if actual != expected {
-        println!("  \x1b[31m[!] SHA256 mismatch — update rejete.\x1b[0m");
+        println!("  \x1b[31m[!] SHA256 mismatch -- update rejected.\x1b[0m");
         std::fs::remove_file(tmp).ok();
         sleep_short();
         return;
     }
 
-    // Remplace le binaire
     let exe = match std::env::current_exe() {
         Ok(p) => p,
         Err(e) => { eprintln!("  current_exe: {}", e); sleep_short(); return; }
     };
     if let Err(e) = std::fs::copy(tmp, &exe) {
-        eprintln!("  Erreur remplacement: {}", e); sleep_short(); return;
+        eprintln!("  Replace error: {}", e); sleep_short(); return;
     }
     std::fs::remove_file(tmp).ok();
 
@@ -86,10 +83,9 @@ pub fn check_and_update() {
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).ok();
     }
 
-    println!("  \x1b[33m[~] v{} -> v{} — relancement...\x1b[0m", CURRENT_VERSION, remote);
+    println!("  \x1b[33m[~] v{} -> v{} -- restarting...\x1b[0m", CURRENT_VERSION, remote);
     std::thread::sleep(Duration::from_secs(1));
 
-    // Re-exec
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -100,21 +96,21 @@ pub fn check_and_update() {
 }
 
 fn splash() {
-    print!("\x1b[2J\x1b[H"); // clear
+    print!("\x1b[2J\x1b[H");
     println!("\x1b[36m");
-    println!("  ██╗    ██╗██╗██████╗ ███████╗");
-    println!("  ██║    ██║██║██╔══██╗██╔════╝");
-    println!("  ██║ █╗ ██║██║██████╔╝█████╗  ");
-    println!("  ██║███╗██║██║██╔═══╝ ██╔══╝  ");
-    println!("  ╚███╔███╔╝██║██║     ███████╗ ");
-    println!("   ╚══╝╚══╝ ╚═╝╚═╝     ╚══════╝");
+    println!("  \u{2588}\u{2588}\u{2557}    \u{2588}\u{2588}\u{2557}\u{2588}\u{2588}\u{2557}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2557} \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2557}");
+    println!("  \u{2588}\u{2588}\u{2551}    \u{2588}\u{2588}\u{2551}\u{2588}\u{2588}\u{2551}\u{2588}\u{2588}\u{2554}\u{2550}\u{2550}\u{2588}\u{2588}\u{2557}\u{2588}\u{2588}\u{2554}\u{2550}\u{2550}\u{2550}\u{2550}\u{255d}");
+    println!("  \u{2588}\u{2588}\u{2551} \u{2588}\u{2557} \u{2588}\u{2588}\u{2551}\u{2588}\u{2588}\u{2551}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2554}\u{255d}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2557}");
+    println!("  \u{2588}\u{2588}\u{2551}\u{2588}\u{2588}\u{2588}\u{2557}\u{2588}\u{2588}\u{2551}\u{2588}\u{2588}\u{2551}\u{2588}\u{2588}\u{2554}\u{2550}\u{2550}\u{2550}\u{255d} \u{2588}\u{2588}\u{2554}\u{2550}\u{2550}\u{255d}");
+    println!("  \u{255a}\u{2588}\u{2588}\u{2588}\u{2554}\u{2588}\u{2588}\u{2588}\u{2554}\u{255d}\u{2588}\u{2588}\u{2551}\u{2588}\u{2588}\u{2551}     \u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}\u{2557}");
+    println!("   \u{255a}\u{2550}\u{2550}\u{255d}\u{255a}\u{2550}\u{2550}\u{255d} \u{255a}\u{2550}\u{255d}\u{255a}\u{2550}\u{255d}     \u{255a}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{2550}\u{255d}");
     println!("\x1b[0m");
     println!("  \x1b[2mWipe Station  v{}\x1b[0m", CURRENT_VERSION);
     println!("  \x1b[2m{}\x1b[0m", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"));
     println!();
 
     for i in (1..=TIMEOUT).rev() {
-        print!("\r  \x1b[2mVerification mise a jour... {}s\x1b[0m  ", i);
+        print!("\r  \x1b[2mChecking for updates... {}s\x1b[0m  ", i);
         std::io::stdout().flush().ok();
         std::thread::sleep(Duration::from_secs(1));
     }
@@ -122,7 +118,7 @@ fn splash() {
 }
 
 fn no_network() {
-    println!("  \x1b[2mPas de reseau — version locale v{}.\x1b[0m", CURRENT_VERSION);
+    println!("  \x1b[2mNo network -- running local v{}.\x1b[0m", CURRENT_VERSION);
     std::thread::sleep(Duration::from_secs(1));
 }
 

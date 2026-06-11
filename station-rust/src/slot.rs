@@ -72,8 +72,8 @@ impl SlotHandle {
     }
 }
 
-/// Lecture instantanée d'un GPIO : acquire + read + drop.
-/// Sans ownership persistant, plusieurs threads peuvent appeler sans conflit rppal.
+/// Read a GPIO pin instantly: acquire + read + drop.
+/// No persistent ownership, so multiple threads can call without rppal conflicts.
 pub fn read_pin_low(gpio_pin: u8) -> bool {
     #[cfg(all(target_os = "linux", feature = "gpio"))]
     {
@@ -133,6 +133,7 @@ fn run_slot(config: SlotConfig, state: Arc<Mutex<SlotState>>) {
         loop {
             if !is_block_device(&config.dev) {
                 disconnected = true;
+                // Let the wipe thread die cleanly (up to 3s)
                 let _ = rx.recv_timeout(Duration::from_secs(3));
                 break;
             }
@@ -150,7 +151,7 @@ fn run_slot(config: SlotConfig, state: Arc<Mutex<SlotState>>) {
                 }
                 Ok(Err(e)) => {
                     let msg = if e.contains("Input/output") || e.contains("EIO") || e.contains("No such") {
-                        "DISQUE DECONNECTE pendant l'effacement !".into()
+                        "DISK DISCONNECTED during wipe!".into()
                     } else {
                         e
                     };
@@ -168,7 +169,7 @@ fn run_slot(config: SlotConfig, state: Arc<Mutex<SlotState>>) {
         }
 
         if disconnected {
-            show_error(&state, "DISQUE DECONNECTE pendant l'effacement !");
+            show_error(&state, "DISK DISCONNECTED during wipe!");
         }
 
         wait_disk_removed(&config.dev);
@@ -236,8 +237,8 @@ fn read_disk_info(dev: &str) -> Result<DiskInfo, String> {
     })
 }
 
-/// Retourne true = wipe demarre (appui court relache < 3s).
-/// Ignore un appui long sans relachement (geste reboot watchdog).
+/// Returns true when the user triggers a wipe (short press, released within 3s).
+/// Ignores long holds (reboot gesture) without releasing.
 fn wait_button(gpio_pin: u8, dev: &str) -> bool {
     loop {
         if !is_block_device(dev) { return false; }
@@ -246,15 +247,14 @@ fn wait_button(gpio_pin: u8, dev: &str) -> bool {
             // Debounce
             thread::sleep(Duration::from_millis(50));
             if !read_pin_low(gpio_pin) { continue; }
-            // Attendre relachement ou timeout reboot
+            // Wait for release or reboot timeout
             loop {
                 if !read_pin_low(gpio_pin) {
-                    // Relache : appui court = lancer wipe
+                    // Released: short press = start wipe
                     return true;
                 }
                 if press_start.elapsed() > Duration::from_secs(3) {
-                    // Tenu trop longtemps = geste reboot, ignorer
-                    // Attendre fin du maintien avant de reboucler
+                    // Held too long = reboot gesture, ignore
                     while read_pin_low(gpio_pin) { thread::sleep(Duration::from_millis(50)); }
                     break;
                 }
