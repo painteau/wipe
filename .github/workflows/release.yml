@@ -1,0 +1,72 @@
+﻿name: Release wipe-station
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag (ex: v2.0.1)'
+        required: true
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust stable + target ARM64
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Cross-linker
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Verifier VERSION == tag
+        if: github.event_name == 'push'
+        run: |
+          TAG=${{ github.ref_name }}
+          VERSION=$(cat station-rust/VERSION | tr -d '[:space:]')
+          if [ "v${VERSION}" != "${TAG}" ]; then
+            echo "ERREUR: station-rust/VERSION (${VERSION}) != tag (${TAG})"
+            exit 1
+          fi
+
+      - name: Build ARM64
+        working-directory: station-rust
+        run: cargo build --release --target aarch64-unknown-linux-gnu
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Preparer artefacts
+        run: |
+          cp station-rust/target/aarch64-unknown-linux-gnu/release/wipe-station ./wipe-station
+          sha256sum wipe-station | awk '{print $1"  wipe-station"}' > wipe-station.sha256
+          cat wipe-station.sha256
+          ls -lh wipe-station
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || inputs.tag }}
+          name: wipe-station ${{ github.ref_name || inputs.tag }}
+          body: |
+            ## Wipe Station ${{ github.ref_name || inputs.tag }}
+            Binaire ARM64 pour Raspberry Pi 4.
+
+            ### Installation
+            ```bash
+            curl -fsSL https://github.com/painteau/wipe/releases/latest/download/wipe-station \
+              -o /usr/local/bin/wipe-station
+            chmod +x /usr/local/bin/wipe-station
+            wipe-station
+            ```
+          files: |
+            wipe-station
+            wipe-station.sha256
