@@ -28,6 +28,33 @@ if command -v systemd-inhibit &>/dev/null; then
 fi
 trap '[ -n "$INHIBIT_PID" ] && kill "$INHIBIT_PID" 2>/dev/null' EXIT
 
+# --- Detect protected disks
+# A disk is protected if any of its partitions is mounted,
+# OR if a loop device backed by a file on it is mounted (Ubuntu live squashfs).
+is_protected() {
+    local disk=$1
+
+    # Direct mount: /dev/sda1, /dev/sda2, etc. in /proc/mounts
+    if grep -q "^/dev/${disk}" /proc/mounts 2>/dev/null; then
+        return 0
+    fi
+
+    # Loop device tracing: squashfs on USB stick (Ubuntu live)
+    while IFS= read -r loop; do
+        local backing
+        backing=$(losetup -n -O BACK-FILE "$loop" 2>/dev/null)
+        [ -z "$backing" ] && continue
+        local src
+        src=$(df -P "$backing" 2>/dev/null | awk 'NR==2{print $1}')
+        [ -z "$src" ] && continue
+        local parent
+        parent=$(lsblk -no PKNAME "$src" 2>/dev/null | head -1)
+        [ "$parent" = "$disk" ] && return 0
+    done < <(losetup -l -n -O NAME 2>/dev/null)
+
+    return 1
+}
+
 # --- Header
 clear
 echo -e "${CYAN}"
@@ -44,14 +71,6 @@ echo ""
 echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-# --- Detect live boot disk
-LIVE_DISK=$(lsblk -no PKNAME $(findmnt -n -o SOURCE / 2>/dev/null) 2>/dev/null | head -1)
-if [ -z "$LIVE_DISK" ]; then
-    LIVE_DISK=$(blkid | grep -iE 'LABEL="(Ubuntu|casper|LIVE)"' | sed 's/[0-9]*:.*//' | sed 's|/dev/||' | head -1)
-fi
-echo -e "  ${DIM}Live boot disk:${NC} ${WHITE}/dev/${LIVE_DISK:-unknown}${NC}  ${DIM}(protected)${NC}"
-echo ""
-
 # --- Scan all block devices
 TARGETS=()
 
@@ -61,17 +80,15 @@ for SYSPATH in /sys/block/sd* /sys/block/hd*; do
 
     [ -b "/dev/$DEV" ] || continue
 
-    if [ "$DEV" = "$LIVE_DISK" ]; then
-        SIZE=$(lsblk -dno SIZE /dev/$DEV 2>/dev/null)
-        MODEL=$(lsblk -dno MODEL /dev/$DEV 2>/dev/null | xargs)
-        echo -e "  ${YELLOW}[~]${NC} /dev/$DEV  ${WHITE}${SIZE}${NC}  ${DIM}${MODEL}${NC}  ${YELLOW}LIVE BOOT - skipped${NC}"
-        continue
-    fi
-
-    ROTATIONAL=$(cat "$SYSPATH/queue/rotational" 2>/dev/null)
     SIZE=$(lsblk -dno SIZE /dev/$DEV 2>/dev/null)
     MODEL=$(lsblk -dno MODEL /dev/$DEV 2>/dev/null | xargs)
+    ROTATIONAL=$(cat "$SYSPATH/queue/rotational" 2>/dev/null)
     TYPE=$(lsblk -dno TRAN /dev/$DEV 2>/dev/null | xargs)
+
+    if is_protected "$DEV"; then
+        echo -e "  ${YELLOW}[~]${NC} /dev/$DEV  ${WHITE}${SIZE}${NC}  ${DIM}${MODEL}${NC}  ${YELLOW}MOUNTED - skipped${NC}"
+        continue
+    fi
 
     if [ "$ROTATIONAL" = "1" ]; then
         echo -e "  ${GREEN}[+]${NC} /dev/$DEV  ${WHITE}${SIZE}${NC}  ${DIM}${MODEL}  ${TYPE}${NC}  ${GREEN}HDD - queued${NC}"
@@ -122,11 +139,9 @@ wipe_disk() {
     local DD_LOG
     DD_LOG=$(mktemp)
 
-    # Run dd in background, stderr (stats) to log file
     dd if=/dev/zero of=/dev/$DEV bs=4M conv=fsync 2>"$DD_LOG" &
     local DD_PID=$!
 
-    # Poll progress every 2s via USR1 signal
     while kill -0 "$DD_PID" 2>/dev/null; do
         sleep 2
         kill -USR1 "$DD_PID" 2>/dev/null
