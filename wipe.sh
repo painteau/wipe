@@ -59,10 +59,8 @@ for SYSPATH in /sys/block/sd* /sys/block/hd*; do
     [ -e "$SYSPATH" ] || continue
     DEV=$(basename "$SYSPATH")
 
-    # Skip if not a block device
     [ -b "/dev/$DEV" ] || continue
 
-    # Skip live boot disk
     if [ "$DEV" = "$LIVE_DISK" ]; then
         SIZE=$(lsblk -dno SIZE /dev/$DEV 2>/dev/null)
         MODEL=$(lsblk -dno MODEL /dev/$DEV 2>/dev/null | xargs)
@@ -70,7 +68,6 @@ for SYSPATH in /sys/block/sd* /sys/block/hd*; do
         continue
     fi
 
-    # Check rotational (1 = HDD, 0 = SSD/NVMe/USB flash)
     ROTATIONAL=$(cat "$SYSPATH/queue/rotational" 2>/dev/null)
     SIZE=$(lsblk -dno SIZE /dev/$DEV 2>/dev/null)
     MODEL=$(lsblk -dno MODEL /dev/$DEV 2>/dev/null | xargs)
@@ -96,11 +93,11 @@ fi
 echo -e "  ${BOLD}${WHITE}Disks to wipe:${NC} ${TARGETS[*]}"
 echo ""
 
-# --- Confirmation
+# --- Confirmation (read from /dev/tty — safe even when piped via curl | bash)
 echo -e "  ${RED}${BOLD}WARNING: All data on the above disks will be destroyed.${NC}"
 echo ""
 echo -ne "  Type ${WHITE}YES${NC} to confirm: "
-read CONFIRM
+read CONFIRM </dev/tty
 echo ""
 
 if [ "$CONFIRM" != "YES" ]; then
@@ -120,24 +117,36 @@ wipe_disk() {
     echo -e "  ${CYAN}[~]${NC} Wiping ${WHITE}/dev/$DEV${NC}  ${DIM}$SIZE  $MODEL${NC}"
     echo ""
 
-    # Unmount all partitions
     umount /dev/${DEV}* 2>/dev/null
 
-    # dd with progress
-    dd if=/dev/zero of=/dev/$DEV bs=4M status=progress conv=fsync 2>&1 \
-        | while IFS= read -r line; do
-            echo -e "      ${DIM}$line${NC}"
-        done
+    local DD_LOG
+    DD_LOG=$(mktemp)
 
-    local EXIT=${PIPESTATUS[0]}
-    echo ""
+    # Run dd in background, stderr (stats) to log file
+    dd if=/dev/zero of=/dev/$DEV bs=4M conv=fsync 2>"$DD_LOG" &
+    local DD_PID=$!
 
-    if [ $EXIT -eq 0 ] || echo "$line" | grep -q "No space left"; then
+    # Poll progress every 2s via USR1 signal
+    while kill -0 "$DD_PID" 2>/dev/null; do
+        sleep 2
+        kill -USR1 "$DD_PID" 2>/dev/null
+        sleep 0.1
+        local LINE
+        LINE=$(tail -1 "$DD_LOG" 2>/dev/null | tr -d '\r')
+        [ -n "$LINE" ] && printf "      \033[2m\033[K%-70s\033[0m\r" "$LINE"
+    done
+
+    wait "$DD_PID"
+    local EXIT=$?
+    printf "\n"
+
+    if [ $EXIT -eq 0 ] || grep -q "No space left" "$DD_LOG"; then
         echo -e "  ${GREEN}[✓]${NC} /dev/$DEV  ${GREEN}DONE${NC}"
     else
         echo -e "  ${RED}[✗]${NC} /dev/$DEV  ${RED}ERROR (exit $EXIT)${NC}"
     fi
 
+    rm -f "$DD_LOG"
     echo ""
     echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
