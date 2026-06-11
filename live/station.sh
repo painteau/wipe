@@ -2,12 +2,14 @@
 # station.sh - Wipe station for Raspberry Pi 4
 # Split screen, hot-swap, GPIO buttons, auto-update
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 
 STATION_URL="https://raw.githubusercontent.com/painteau/wipe/main/live/station.sh"
+STATION_SHA256_URL="https://raw.githubusercontent.com/painteau/wipe/main/live/station.sh.sha256"
 STATION_BIN="/usr/local/bin/wipe-station.sh"
 UPDATE_TIMEOUT=7
 LOG_FILE="/var/log/wipe-station.log"
+LOG_DIR="/run/wipe-station"
 
 # GPIO pins (BCM numbering)
 GPIO_BTN_SLOT1=17   # Physical pin 11
@@ -29,14 +31,20 @@ NC='\033[0m'
 
 # --- Logging
 log() {
-    mkdir -p "$(dirname "$LOG_FILE")"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+log_init() {
+    mkdir -p "$(dirname "$LOG_FILE")" "$LOG_DIR"
+    chmod 700 "$LOG_DIR"
+    touch "$LOG_FILE" 2>/dev/null || true
+    chmod 640 "$LOG_FILE" 2>/dev/null || true  # M1: restrict log perms
 }
 
 # --- Dependency check at startup
 check_deps() {
     local missing=()
-    for cmd in tmux curl dd lsblk udevadm losetup python3; do
+    for cmd in tmux curl dd lsblk udevadm losetup python3 sha256sum; do
         command -v "$cmd" &>/dev/null || missing+=("$cmd")
     done
     if [ ${#missing[@]} -gt 0 ]; then
@@ -48,18 +56,53 @@ check_deps() {
     fi
 }
 
-# --- Ensure pigpiod is running
+# --- M2: Ensure pigpiod is running and socket ready
 ensure_pigpiod() {
     if ! pgrep -x pigpiod &>/dev/null; then
         log "pigpiod not running, starting..."
         pigpiod 2>/dev/null || true
-        sleep 1
     fi
+    # Wait for socket ready (up to 5s)
+    local i=0
+    while [ $i -lt 10 ]; do
+        python3 -c "import pigpio; pi=pigpio.pi(); pi.connected and pi.stop()" 2>/dev/null && return 0
+        sleep 0.5
+        i=$(( i + 1 ))
+    done
+    log "WARNING: pigpiod socket not ready after 5s"
+    return 1
 }
 
 # --- Version comparison: returns 0 if $1 > $2
 version_gt() {
     [ "$(printf '%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ] && [ "$1" != "$2" ]
+}
+
+# --- C1: Verify sha256 of downloaded file before applying update
+verify_sha256() {
+    local file=$1
+    local tmp_sha
+    tmp_sha=$(mktemp -p "$LOG_DIR") || return 1
+    chmod 600 "$tmp_sha"
+
+    if ! curl -fsSL --max-time 5 "$STATION_SHA256_URL" -o "$tmp_sha" 2>/dev/null; then
+        rm -f "$tmp_sha"
+        echo -e "  ${RED}[!] Cannot fetch sha256 — update blocked.${NC}"
+        log "Update blocked: sha256 file unavailable"
+        return 1
+    fi
+
+    local expected actual
+    expected=$(awk '{print $1}' "$tmp_sha")
+    actual=$(sha256sum "$file" | awk '{print $1}')
+    rm -f "$tmp_sha"
+
+    if [ "$expected" != "$actual" ]; then
+        echo -e "  ${RED}[!] SHA256 mismatch — update rejected.${NC}"
+        log "Update rejected: sha256 mismatch (expected=${expected} actual=${actual})"
+        return 1
+    fi
+    return 0
 }
 
 # --- Self-update with countdown
@@ -87,8 +130,11 @@ self_update() {
     done
     printf "\033[K"
 
+    # H3: temp file in restricted dir
+    mkdir -p "$LOG_DIR" && chmod 700 "$LOG_DIR" 2>/dev/null || true
     local tmp
-    tmp=$(mktemp) || { echo -e "  ${DIM}mktemp failed — skipping update.${NC}"; sleep 1; return; }
+    tmp=$(mktemp -p "$LOG_DIR") || { echo -e "  ${DIM}mktemp failed — skipping update.${NC}"; sleep 1; return; }
+    chmod 600 "$tmp"
 
     curl -fsSL --max-time "$UPDATE_TIMEOUT" "$STATION_URL" -o "$tmp" 2>/dev/null
     local CURL_EXIT=$?
@@ -103,14 +149,22 @@ self_update() {
     local remote_version
     remote_version=$(grep '^VERSION=' "$tmp" | head -1 | cut -d'"' -f2)
 
-    if [ -z "$remote_version" ]; then
-        echo -e "  ${DIM}Could not parse remote version — running v${VERSION}.${NC}"
+    # F2: validate remote version format
+    if [ -z "$remote_version" ] || ! [[ "$remote_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo -e "  ${DIM}Invalid remote version — skipping update.${NC}"
         rm -f "$tmp"
         sleep 1
         return
     fi
 
     if version_gt "$remote_version" "$VERSION"; then
+        echo -e "  ${YELLOW}[~] v${remote_version} available — verifying...${NC}"
+        # C1: sha256 verification before applying
+        if ! verify_sha256 "$tmp"; then
+            rm -f "$tmp"
+            sleep 2
+            return
+        fi
         echo -e "  ${YELLOW}[~] Update: v${VERSION} -> v${remote_version} — applying...${NC}"
         log "Updating v${VERSION} -> v${remote_version}"
         mv "$tmp" "$STATION_BIN" && chmod +x "$STATION_BIN" || {
@@ -134,7 +188,7 @@ disk_size()   { lsblk -dno SIZE "$1" 2>/dev/null; }
 disk_model()  { lsblk -dno MODEL "$1" 2>/dev/null | xargs; }
 disk_bytes()  { lsblk -dno SIZE --bytes "$1" 2>/dev/null; }
 
-# --- Estimate wipe time, guards against empty/zero
+# --- Estimate wipe time
 estimate_time() {
     local bytes=$1
     if [ -z "$bytes" ] || ! [[ "$bytes" =~ ^[0-9]+$ ]] || [ "$bytes" -eq 0 ]; then
@@ -147,10 +201,10 @@ estimate_time() {
     printf "%dh%02dm" $(( seconds / 3600 )) $(( (seconds % 3600) / 60 ))
 }
 
-# --- Wait for GPIO button, fallback to Enter if GPIO unavailable
+# --- H4: Wait for GPIO button — no keyboard fallback
 wait_button() {
     local pin=$1
-    ensure_pigpiod
+    ensure_pigpiod || true
 
     python3 - "$pin" << 'PYEOF' 2>/dev/null
 import sys, pigpio, time
@@ -173,9 +227,13 @@ except Exception:
 PYEOF
 
     if [ $? -ne 0 ]; then
-        echo -e "  ${DIM}(GPIO unavailable — press Enter to start)${NC}"
-        read -r </dev/tty 2>/dev/null || sleep 3
+        log "ERROR: GPIO pin ${pin} unavailable"
+        echo -e "  ${RED}[!] GPIO error (pin ${pin}). Check pigpiod.${NC}"
+        echo -e "  ${DIM}Waiting 15s before retry...${NC}"
+        sleep 15
+        return 1
     fi
+    return 0
 }
 
 # --- Wipe a single slot (runs in its own tmux pane)
@@ -184,6 +242,17 @@ wipe_slot() {
     local DEV=$2
     local BTN_PIN=$3
     local DD_PID="" DD_LOG=""
+
+    # C3: strict device validation — only /dev/sda or /dev/sdb
+    if ! [[ "$DEV" =~ ^/dev/sd[ab]$ ]]; then
+        echo -e "${RED}[!] FATAL: device '${DEV}' not allowed — only /dev/sda or /dev/sdb.${NC}"
+        log "FATAL SLOT${SLOT}: invalid device ${DEV}"
+        sleep 60
+        exit 1
+    fi
+
+    # Ensure log dir accessible from this pane
+    mkdir -p "$LOG_DIR" && chmod 700 "$LOG_DIR" 2>/dev/null || true
 
     # Cleanup trap for this slot
     trap 'kill "$DD_PID" 2>/dev/null; rm -f "$DD_LOG"' EXIT INT TERM
@@ -206,7 +275,7 @@ wipe_slot() {
             sleep 1
         fi
 
-        # Check rotational
+        # Check rotational (HDD only)
         local DEV_NAME ROTATIONAL
         DEV_NAME=$(basename "$DEV")
         ROTATIONAL=$(cat "/sys/block/${DEV_NAME}/queue/rotational" 2>/dev/null)
@@ -236,7 +305,7 @@ wipe_slot() {
         echo -e "  ${BOLD}Press button to start wipe...${NC}"
         echo ""
 
-        wait_button "$BTN_PIN"
+        wait_button "$BTN_PIN" || continue
 
         # Re-check disk still present after button press
         if [ ! -b "$DEV" ]; then
@@ -249,16 +318,21 @@ wipe_slot() {
         echo -e "  ${CYAN}[~] Wiping...${NC}"
         echo ""
 
-        umount ${DEV}* 2>/dev/null || true
+        # H2: safe partition unmount via lsblk enumeration (no glob)
+        while IFS= read -r part; do
+            [ -n "$part" ] && sudo umount "/dev/$part" 2>/dev/null || true
+        done < <(lsblk -lno NAME "$DEV" 2>/dev/null | grep -v "^${DEV_NAME}$")
 
-        DD_LOG=$(mktemp) || { echo -e "  ${RED}[!] mktemp failed.${NC}"; sleep 3; continue; }
+        # H3: temp file in restricted dir with strict perms
+        DD_LOG=$(mktemp -p "$LOG_DIR") || { echo -e "  ${RED}[!] mktemp failed.${NC}"; sleep 3; continue; }
+        chmod 600 "$DD_LOG"
 
         dd if=/dev/zero of="$DEV" bs=4M conv=fsync 2>"$DD_LOG" &
         DD_PID=$!
 
         local DISCONNECTED=0
+        local LINE=""
         while kill -0 "$DD_PID" 2>/dev/null; do
-            # Detect disk disconnect during wipe
             if [ ! -b "$DEV" ]; then
                 kill "$DD_PID" 2>/dev/null
                 DISCONNECTED=1
@@ -267,7 +341,6 @@ wipe_slot() {
             sleep 2
             kill -USR1 "$DD_PID" 2>/dev/null
             sleep 0.1
-            local LINE
             LINE=$(tail -1 "$DD_LOG" 2>/dev/null | tr -d '\r')
             [ -n "$LINE" ] && printf "      \033[2m\033[K%-60s\033[0m\r" "$LINE"
         done
@@ -284,7 +357,7 @@ wipe_slot() {
             echo -e "  ${DIM}$(date '+%Y-%m-%d %H:%M:%S')${NC}"
             log "SLOT${SLOT} DONE: ${MODEL} ${SERIAL} ${SIZE} on ${DEV}"
         else
-            local ERR_MSG
+            local ERR_MSG=""
             ERR_MSG=$(tail -1 "$DD_LOG" 2>/dev/null | tr -d '\r')
             echo -e "  ${RED}${BOLD}[✗] ERROR (exit $EXIT)${NC}"
             [ -n "$ERR_MSG" ] && echo -e "  ${DIM}${ERR_MSG}${NC}"
@@ -306,12 +379,13 @@ wipe_slot() {
 }
 
 # --- Main: check if running inside a tmux pane
-if [ -n "$WIPE_SLOT" ]; then
-    wipe_slot "$WIPE_SLOT" "$WIPE_DEV" "$WIPE_BTN"
+if [ -n "${WIPE_SLOT:-}" ]; then
+    wipe_slot "$WIPE_SLOT" "${WIPE_DEV:-}" "${WIPE_BTN:-}"
     exit 0
 fi
 
-# --- Startup checks
+# --- Startup
+log_init
 check_deps
 
 # --- Self-update
