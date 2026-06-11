@@ -1,108 +1,114 @@
 # wipe
 
-Zero-wipe utility for rotational HDD disks.  
-Two modes: bash script (quick use) and Rust TUI station (Raspberry Pi kiosk).
+> Zero-wipe utility for rotational HDDs. Two modes: a bash script for quick use and a Rust TUI station designed for a Raspberry Pi kiosk with a 2-bay SATA dock.
 
 ```
-  ██╗    ██╗██╗██╗  ██╗██╗  ██╗
-  ██║    ██║██║██║  ██║██║  ██║
-  ██║    ██║██║██████╔╝██████╔╝
-  ██║    ██║██║██╔═══╝ ██╔═══╝
-  ████████╗██║██║     ██║
-  ╚═══════╝╚═╝╚═╝     ╚═╝
+ ██╗    ██╗██╗██████╗ ██████╗
+ ██║    ██║██║██╔════╝██╔════╝
+ ██║ █╗ ██║██║█████╗  ██║  ███╗
+ ██║███╗██║██║██╔══╝  ██║   ██║
+ ╚███╔███╔╝██║███████╗╚██████╔╝
+  ╚══╝╚══╝ ╚═╝╚══════╝ ╚═════╝
 ```
+
+**Automatically skips SSDs, NVMe, USB flash drives, and the live boot disk.**
 
 ---
 
-## Bash script (usage ponctuel)
+## Bash script
+
+For quick, one-shot use on any Linux machine.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/painteau/wipe/main/launch.sh | sudo bash
 ```
 
-> Doit etre execute en root.
+Requires root. The script verifies its own SHA256 checksum before running.
 
-### Ce que fait le script
+### What it does
 
-1. Detecte et protege tous les disques montes (dont le live USB)
-2. Scanne les block devices (`/dev/sd*`, `/dev/hd*`)
-3. Ne conserve que les HDD rotatifs (`rotational=1`)
-4. Demande une confirmation explicite `YES`
-5. Empeche la mise en veille (`systemd-inhibit`)
-6. Efface chaque disque avec `dd if=/dev/zero` (blocs 4M)
-7. Verifie l'integrite du script via SHA256 avant execution
+1. Detects and protects all mounted disks (including the live USB)
+2. Scans block devices (`/dev/sd*`, `/dev/hd*`)
+3. Queues only rotational HDDs (`rotational=1`)
+4. Asks for explicit `YES` confirmation
+5. Prevents sleep/suspend during the wipe (`systemd-inhibit`)
+6. Wipes each disk sequentially with `dd if=/dev/zero` at 4 MB block size
 
 ---
 
-## Station Rust TUI (Raspberry Pi kiosk)
+## Rust TUI station
 
-Interface graphique en mode terminal, split-screen, style defrag Windows 98.
-Concu pour une boite en bois avec dock SATA 2 baies et boutons GPIO physiques.
+A full-screen terminal interface built with [ratatui](https://github.com/ratatui-org/ratatui), designed to run on a **Raspberry Pi 4** inside a wooden enclosure with a 2-bay SATA dock and physical GPIO buttons. No keyboard required.
 
-### Materiel
+### Hardware
 
-| Composant | Detail |
+| Component | Detail |
 |-----------|--------|
-| Pi 4 | ARM64, Ubuntu 24.04 |
-| Dock SATA 2 baies | `/dev/sda` + `/dev/sdb` |
-| Bouton slot A | GPIO 17 (pin physique 11) |
-| Bouton slot B | GPIO 27 (pin physique 13) |
-| Ecran | HDMI, pas de clavier |
+| Board | Raspberry Pi 4, ARM64, Ubuntu 24.04 |
+| Storage dock | 2-bay USB-SATA (`/dev/sda` + `/dev/sdb`) |
+| Button A | GPIO 17 (physical pin 11) |
+| Button B | GPIO 27 (physical pin 13) |
+| Display | HDMI monitor, no keyboard |
 
 ### Interface
 
 ```
-+------------------------------------------------------+
-|  WIPE STATION v2.1.0  |  2026-06-11 14:32:01  |  [2 boutons 10s = reboot]  |
-+---------------------------+---------------------------+
-|  SLOT 1                   |  SLOT 2                   |
-|  Modele : WD Blue 4TB     |  En attente d'un          |
-|  Serie  : WD-12345        |  disque HDD...            |
-|  Taille : 4000 GB         |                           |
-|                           |                           |
-|  ████ ████ ████ ░░░░ ░░░░ |                           |
-|  ████ ████ ░░░░ ░░░░ ░░░░ |                           |
-|  ░░░░ ░░░░ ░░░░ ░░░░ ░░░░ |                           |
-|                           |                           |
-|  42.0%  87 MB/s  +18m  -25m                          |
-+---------------------------+---------------------------+
++--------------------------------------------------------------------+
+|  WIPE STATION v2.1.0  |  2026-06-11 14:32:01  |  [hold both 10s = reboot]  |
++--------------------------------+-----------------------------------+
+|  SLOT 1                        |  SLOT 2                           |
+|                                |                                   |
+|  Model  : WD Blue              |  Waiting for a HDD...             |
+|  Serial : WD-WX31E46NKSA7      |                                   |
+|  Size   : 4000 GB              |                                   |
+|  Est.   : ~10h42m              |                                   |
+|                                |                                   |
+|  ██ ██ ██ ██ ██ ██ ██ ██ ░░ ░░  |                                   |
+|  ██ ██ ██ ██ ██ ██ ░░ ░░ ░░ ░░  |                                   |
+|  ░░ ░░ ░░ ░░ ░░ ░░ ░░ ░░ ░░ ░░  |                                   |
+|  ░░ ░░ ░░ ░░ ░░ ░░ ░░ ░░ ░░ ░░  |                                   |
+|                                |                                   |
+|  42.0%  87 MB/s  +18m30s  -25m12s                                 |
++--------------------------------+-----------------------------------+
 ```
 
-### Comportement par slot
+### Slot states
 
-| Etat | Affichage | Action |
-|------|-----------|--------|
-| Aucun disque | Gris, message attente | Attendre |
-| SSD detecte | Rouge, rejet | Retirer le disque |
-| HDD pret | Jaune, clignotant | Appuyer bouton (appui court < 3s) |
-| Effacement | Cyan, grille defrag | Automatique |
-| Termine | Vert, grille pleine | Retirer le disque |
-| Erreur | Rouge, message | Retirer le disque |
+| State | Color | Description |
+|-------|-------|-------------|
+| Waiting for disk | Gray | No drive detected |
+| SSD rejected | Red | Drive is not rotational |
+| Ready | Yellow (blinking) | HDD detected, awaiting button press |
+| Wiping | Cyan | Write in progress, defrag-style grid |
+| Done | Green | Wipe complete, remove the disk |
+| Error | Red | I/O error or disk disconnected |
 
-### Boutons GPIO
+### Button behavior
 
-- **Appui court** (relache < 3s) : lance l'effacement du slot
-- **Maintenir les 2 boutons 10s** : reboot du Pi
-
-> Les appuis longs (> 3s) sans relachement sont ignores par les slots
-> pour ne pas declencher de wipe accidentel lors d'un reboot.
+| Action | Result |
+|--------|--------|
+| Short press, released (< 3s) | Start wipe on that slot |
+| Hold both buttons for 10s | Reboot the Pi |
+| Press during active wipe | Ignored |
+| Hold > 3s without releasing | Ignored (treated as reboot gesture, not a wipe trigger) |
 
 ### Installation
 
-```bash
-# Telechargement du binaire pre-compile ARM64
-curl -fsSL https://github.com/painteau/wipe/releases/latest/download/wipe-station -o /usr/local/bin/wipe-station
-curl -fsSL https://github.com/painteau/wipe/releases/latest/download/wipe-station.sha256 -o /tmp/wipe-station.sha256
+Download the pre-built ARM64 binary from the latest release:
 
-# Verification SHA256
+```bash
+curl -fsSL https://github.com/painteau/wipe/releases/latest/download/wipe-station \
+  -o /usr/local/bin/wipe-station
+curl -fsSL https://github.com/painteau/wipe/releases/latest/download/wipe-station.sha256 \
+  -o /tmp/wipe-station.sha256
+
 sha256sum -c /tmp/wipe-station.sha256
 chmod +x /usr/local/bin/wipe-station
 
-# Lancer
 sudo wipe-station
 ```
 
-### Service systemd
+### Run as a systemd service
 
 ```ini
 [Unit]
@@ -120,30 +126,33 @@ TTYPath=/dev/tty1
 WantedBy=multi-user.target
 ```
 
-### Mise a jour automatique
+```bash
+sudo systemctl enable --now wipe-station
+```
 
-Au demarrage, la station verifie `station-rust/VERSION` sur GitHub.  
-Si version plus recente disponible : telechargement, verification SHA256, re-exec automatique.
+### Auto-update
 
-### Compilation manuelle
+On startup, the station fetches `station-rust/VERSION` from GitHub. If a newer version is available, it downloads the binary, verifies the SHA256 checksum, and re-executes itself automatically.
+
+### Build from source
 
 ```bash
 cd station-rust
 cargo build --release --features gpio
 ```
 
-> Cross-compilation ARM64 : voir `.github/workflows/release.yml`
+Cross-compilation to ARM64 is handled by `.github/workflows/release.yml` and triggered automatically on version tags (`v*.*.*`).
 
 ---
 
-## Logique de detection disque
+## Disk selection logic
 
 | Type | Action |
 |------|--------|
-| HDD rotatif non monte | Efface |
-| SSD / NVMe / USB flash | Rejete |
-| Disque monte | Protege (ignore) |
+| Rotational HDD, unmounted | Wiped |
+| SSD / NVMe / USB flash | Rejected |
+| Any mounted disk | Protected, skipped |
 
-## Avertissement
+---
 
-**Operation irreversible.** Toutes les donnees sur les disques selectionnes seront definitvement detruites.
+> **Warning:** This operation is irreversible. All data on selected disks will be permanently destroyed.
