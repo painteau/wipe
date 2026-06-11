@@ -29,17 +29,13 @@ fi
 trap '[ -n "$INHIBIT_PID" ] && kill "$INHIBIT_PID" 2>/dev/null' EXIT
 
 # --- Detect protected disks
-# A disk is protected if any of its partitions is mounted,
-# OR if a loop device backed by a file on it is mounted (Ubuntu live squashfs).
 is_protected() {
     local disk=$1
 
-    # Direct mount: /dev/sda1, /dev/sda2, etc. in /proc/mounts
     if grep -q "^/dev/${disk}" /proc/mounts 2>/dev/null; then
         return 0
     fi
 
-    # Loop device tracing: squashfs on USB stick (Ubuntu live)
     while IFS= read -r loop; do
         local backing
         backing=$(losetup -n -O BACK-FILE "$loop" 2>/dev/null)
@@ -110,14 +106,14 @@ fi
 echo -e "  ${BOLD}${WHITE}Disks to wipe:${NC} ${TARGETS[*]}"
 echo ""
 
-# --- Confirmation (read from /dev/tty — safe even when piped via curl | bash)
+# --- Confirmation (case-insensitive, reads from /dev/tty — safe with curl | bash)
 echo -e "  ${RED}${BOLD}WARNING: All data on the above disks will be destroyed.${NC}"
 echo ""
-echo -ne "  Type ${WHITE}YES${NC} to confirm: "
+echo -ne "  Type ${WHITE}yes${NC} to confirm: "
 read CONFIRM </dev/tty
 echo ""
 
-if [ "$CONFIRM" != "YES" ]; then
+if [[ "${CONFIRM^^}" != "YES" ]]; then
     echo -e "  ${YELLOW}[~] Aborted.${NC}"
     exit 0
 fi
