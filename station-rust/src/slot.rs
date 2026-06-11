@@ -76,6 +76,11 @@ fn set(state: &Arc<Mutex<SlotState>>, new: SlotState) {
     *state.lock().unwrap() = new;
 }
 
+fn show_error(state: &Arc<Mutex<SlotState>>, msg: impl Into<String>) {
+    set(state, SlotState::Error { message: msg.into() });
+    thread::sleep(Duration::from_secs(8));
+}
+
 fn run_slot(config: SlotConfig, state: Arc<Mutex<SlotState>>) {
     loop {
         set(&state, SlotState::WaitingForDisk);
@@ -83,12 +88,7 @@ fn run_slot(config: SlotConfig, state: Arc<Mutex<SlotState>>) {
 
         let info = match read_disk_info(&config.dev) {
             Ok(i) => i,
-            Err(e) => {
-                set(&state, SlotState::Error { message: e });
-                thread::sleep(Duration::from_secs(5));
-                wait_disk_removed(&config.dev);
-                continue;
-            }
+            Err(e) => { show_error(&state, e); wait_disk_removed(&config.dev); continue; }
         };
 
         if !is_rotational(&config.dev) {
@@ -98,9 +98,7 @@ fn run_slot(config: SlotConfig, state: Arc<Mutex<SlotState>>) {
         }
 
         set(&state, SlotState::Ready(info.clone()));
-        if !wait_button(config.gpio_pin, &config.dev) {
-            continue;
-        }
+        if !wait_button(config.gpio_pin, &config.dev) { continue; }
         if !is_block_device(&config.dev) { continue; }
 
         let progress = Arc::new(Mutex::new(WipeProgress {
@@ -115,27 +113,50 @@ fn run_slot(config: SlotConfig, state: Arc<Mutex<SlotState>>) {
         thread::spawn(move || { let _ = tx.send(crate::wipe::wipe_device(&dev, size, pw)); });
 
         let start = Instant::now();
+        let mut disconnected = false;
+
         loop {
+            // Détection proactive déconnexion (avant même que write échoue)
+            if !is_block_device(&config.dev) {
+                disconnected = true;
+                // Laisser le thread wipe mourir proprement (max 3s)
+                let _ = rx.recv_timeout(Duration::from_secs(3));
+                break;
+            }
+
             let p = progress.lock().unwrap().clone();
             set(&state, SlotState::Wiping { info: info.clone(), progress: p });
 
             match rx.try_recv() {
                 Ok(Ok(_)) => {
-                    set(&state, SlotState::Done { info: info.clone(), elapsed_secs: start.elapsed().as_secs() });
+                    set(&state, SlotState::Done {
+                        info: info.clone(),
+                        elapsed_secs: start.elapsed().as_secs(),
+                    });
                     break;
                 }
                 Ok(Err(e)) => {
-                    set(&state, SlotState::Error { message: e });
+                    // Erreur IO (peut aussi être une deconnexion detectee par write)
+                    let msg = if e.contains("Input/output") || e.contains("EIO") || e.contains("No such") {
+                        "DISQUE DECONNECTE pendant l'effacement !".into()
+                    } else {
+                        e
+                    };
+                    show_error(&state, msg);
                     break;
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    set(&state, SlotState::Error { message: "wipe thread crashed".into() });
+                    show_error(&state, "wipe thread crashed");
                     break;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
                     thread::sleep(Duration::from_millis(200));
                 }
             }
+        }
+
+        if disconnected {
+            show_error(&state, "DISQUE DECONNECTE pendant l'effacement !");
         }
 
         wait_disk_removed(&config.dev);
@@ -218,7 +239,6 @@ fn wait_button(gpio_pin: u8, dev: &str) -> bool {
             }
         }
     }
-    // GPIO unavailable: wait indefinitely, disk removal = cancel
     loop {
         if !is_block_device(dev) { return false; }
         thread::sleep(Duration::from_millis(200));
