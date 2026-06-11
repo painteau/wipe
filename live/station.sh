@@ -4,6 +4,7 @@
 
 STATION_URL="https://raw.githubusercontent.com/painteau/wipe/main/live/station.sh"
 STATION_BIN="/usr/local/bin/wipe-station.sh"
+UPDATE_TIMEOUT=5   # seconds before giving up on network
 
 # GPIO pins (BCM numbering)
 GPIO_BTN_SLOT1=17   # Physical pin 11
@@ -23,16 +24,45 @@ DIM='\033[2m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# --- Self-update from GitHub
+# --- Self-update with countdown
 self_update() {
+    echo ""
+    local i=$UPDATE_TIMEOUT
+    while [ $i -gt 0 ]; do
+        printf "  \033[2mChecking for updates... %ds\033[0m\r" "$i"
+        sleep 1
+        i=$(( i - 1 ))
+    done
+    printf "\033[K"
+
+    local tmp
+    tmp=$(mktemp)
+
+    # Fetch with hard timeout
+    curl -fsSL --max-time "$UPDATE_TIMEOUT" "$STATION_URL" -o "$tmp" 2>/dev/null
+    local CURL_EXIT=$?
+
+    if [ $CURL_EXIT -ne 0 ] || [ ! -s "$tmp" ]; then
+        echo -e "  ${DIM}No network — using local version.${NC}"
+        rm -f "$tmp"
+        sleep 1
+        return
+    fi
+
     local remote_hash local_hash
-    remote_hash=$(curl -fsSL "$STATION_URL" 2>/dev/null | sha256sum | cut -d' ' -f1)
+    remote_hash=$(sha256sum "$tmp" | cut -d' ' -f1)
     local_hash=$(sha256sum "$STATION_BIN" 2>/dev/null | cut -d' ' -f1)
-    if [ -n "$remote_hash" ] && [ "$remote_hash" != "$local_hash" ]; then
-        echo -e "${YELLOW}[~] Updating station.sh...${NC}"
-        curl -fsSL "$STATION_URL" -o "$STATION_BIN"
+
+    if [ "$remote_hash" != "$local_hash" ]; then
+        echo -e "  ${YELLOW}[~] Update found, applying...${NC}"
+        mv "$tmp" "$STATION_BIN"
         chmod +x "$STATION_BIN"
+        sleep 1
         exec "$STATION_BIN"
+    else
+        echo -e "  ${GREEN}[✓] Up to date.${NC}"
+        rm -f "$tmp"
+        sleep 1
     fi
 }
 
@@ -42,10 +72,10 @@ disk_size()   { lsblk -dno SIZE "$1" 2>/dev/null; }
 disk_model()  { lsblk -dno MODEL "$1" 2>/dev/null | xargs; }
 disk_bytes()  { lsblk -dno SIZE --bytes "$1" 2>/dev/null; }
 
-# --- Estimate wipe time (USB 2.0 ~25 MB/s, USB 3.0 ~100 MB/s)
+# --- Estimate wipe time (USB 3.0 ~100 MB/s)
 estimate_time() {
     local bytes=$1
-    local speed=104857600  # 100 MB/s default (USB 3.0)
+    local speed=104857600
     local seconds=$(( bytes / speed ))
     printf "%dh%02dm" $(( seconds / 3600 )) $(( (seconds % 3600) / 60 ))
 }
@@ -59,7 +89,6 @@ pin = int(sys.argv[1])
 pi = pigpio.pi()
 pi.set_mode(pin, pigpio.INPUT)
 pi.set_pull_up_down(pin, pigpio.PUD_UP)
-print("", flush=True)
 while True:
     if pi.read(pin) == 0:
         time.sleep(0.05)
@@ -80,11 +109,7 @@ wipe_slot() {
         clear
 
         echo -e "${CYAN}"
-        if [ "$SLOT" = "1" ]; then
-            echo "  SLOT 1 (LEFT)"
-        else
-            echo "  SLOT 2 (RIGHT)"
-        fi
+        [ "$SLOT" = "1" ] && echo "  SLOT 1 (LEFT)" || echo "  SLOT 2 (RIGHT)"
         echo -e "${NC}"
         echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
@@ -100,13 +125,14 @@ wipe_slot() {
         DEV_NAME=$(basename "$DEV")
         ROTATIONAL=$(cat "/sys/block/${DEV_NAME}/queue/rotational" 2>/dev/null)
         if [ "$ROTATIONAL" != "1" ]; then
-            echo -e "  ${RED}[!] Not a HDD (SSD/Flash detected). Skipped.${NC}"
+            echo -e "  ${RED}[!] SSD/Flash detected — skipped.${NC}"
             echo -e "  ${DIM}Remove disk to continue.${NC}"
             while [ -b "$DEV" ]; do sleep 1; done
             continue
         fi
 
         # Display disk info
+        local SERIAL MODEL SIZE BYTES ETA
         SERIAL=$(disk_serial "$DEV")
         MODEL=$(disk_model "$DEV")
         SIZE=$(disk_size "$DEV")
@@ -116,23 +142,20 @@ wipe_slot() {
         echo -e "  ${WHITE}Model  :${NC}  ${MODEL}"
         echo -e "  ${WHITE}Serial :${NC}  ${SERIAL:-unknown}"
         echo -e "  ${WHITE}Size   :${NC}  ${SIZE}"
-        echo -e "  ${WHITE}Time   :${NC}  ~${ETA}"
+        echo -e "  ${WHITE}Est.   :${NC}  ~${ETA}"
         echo ""
         echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
         echo -e "  ${BOLD}Press button to start wipe...${NC}"
         echo ""
 
-        # Wait for button press
         wait_button "$BTN_PIN"
 
         echo -e "  ${CYAN}[~] Wiping...${NC}"
         echo ""
 
-        # Unmount
         umount ${DEV}* 2>/dev/null
 
-        # Wipe
         local DD_LOG
         DD_LOG=$(mktemp)
 
@@ -166,20 +189,18 @@ wipe_slot() {
         echo ""
         echo -e "  ${DIM}Remove disk to wipe another.${NC}"
 
-        # Wait for disk removal
         while [ -b "$DEV" ]; do sleep 1; done
         sleep 1
     done
 }
 
-# --- Main: check if inside tmux pane
+# --- Main: check if running inside a tmux pane
 if [ -n "$WIPE_SLOT" ]; then
-    # Running inside tmux pane
     wipe_slot "$WIPE_SLOT" "$WIPE_DEV" "$WIPE_BTN"
     exit 0
 fi
 
-# --- Self-update (only on first launch, not inside pane)
+# --- Self-update (only on main launch)
 self_update
 
 # --- Launch tmux split screen
@@ -188,11 +209,9 @@ tmux kill-session -t wipestation 2>/dev/null
 tmux new-session -d -s wipestation -x "$(tput cols)" -y "$(tput lines)"
 tmux split-window -h -t wipestation
 
-# Left pane: slot 1
 tmux send-keys -t wipestation:0.0 \
     "WIPE_SLOT=1 WIPE_DEV=${SLOT1_DEV} WIPE_BTN=${GPIO_BTN_SLOT1} $STATION_BIN" Enter
 
-# Right pane: slot 2
 tmux send-keys -t wipestation:0.1 \
     "WIPE_SLOT=2 WIPE_DEV=${SLOT2_DEV} WIPE_BTN=${GPIO_BTN_SLOT2} $STATION_BIN" Enter
 
