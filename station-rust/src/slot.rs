@@ -72,6 +72,21 @@ impl SlotHandle {
     }
 }
 
+/// Lecture instantanée d'un GPIO : acquire + read + drop.
+/// Sans ownership persistant, plusieurs threads peuvent appeler sans conflit rppal.
+pub fn read_pin_low(gpio_pin: u8) -> bool {
+    #[cfg(all(target_os = "linux", feature = "gpio"))]
+    {
+        if let Ok(gpio) = Gpio::new() {
+            if let Ok(pin) = gpio.get(gpio_pin) {
+                return pin.into_input_pullup().is_low();
+            }
+        }
+    }
+    let _ = gpio_pin;
+    false
+}
+
 fn set(state: &Arc<Mutex<SlotState>>, new: SlotState) {
     *state.lock().unwrap() = new;
 }
@@ -116,10 +131,8 @@ fn run_slot(config: SlotConfig, state: Arc<Mutex<SlotState>>) {
         let mut disconnected = false;
 
         loop {
-            // Détection proactive déconnexion (avant même que write échoue)
             if !is_block_device(&config.dev) {
                 disconnected = true;
-                // Laisser le thread wipe mourir proprement (max 3s)
                 let _ = rx.recv_timeout(Duration::from_secs(3));
                 break;
             }
@@ -136,7 +149,6 @@ fn run_slot(config: SlotConfig, state: Arc<Mutex<SlotState>>) {
                     break;
                 }
                 Ok(Err(e)) => {
-                    // Erreur IO (peut aussi être une deconnexion detectee par write)
                     let msg = if e.contains("Input/output") || e.contains("EIO") || e.contains("No such") {
                         "DISQUE DECONNECTE pendant l'effacement !".into()
                     } else {
@@ -225,23 +237,13 @@ fn read_disk_info(dev: &str) -> Result<DiskInfo, String> {
 }
 
 fn wait_button(gpio_pin: u8, dev: &str) -> bool {
-    #[cfg(all(target_os = "linux", feature = "gpio"))]
-    if let Ok(gpio) = Gpio::new() {
-        if let Ok(pin) = gpio.get(gpio_pin) {
-            let pin = pin.into_input_pullup();
-            loop {
-                if !is_block_device(dev) { return false; }
-                if pin.is_low() {
-                    thread::sleep(Duration::from_millis(50));
-                    if pin.is_low() { return true; }
-                }
-                thread::sleep(Duration::from_millis(50));
-            }
-        }
-    }
     loop {
         if !is_block_device(dev) { return false; }
-        thread::sleep(Duration::from_millis(200));
+        if read_pin_low(gpio_pin) {
+            thread::sleep(Duration::from_millis(50));
+            if read_pin_low(gpio_pin) { return true; }
+        }
+        thread::sleep(Duration::from_millis(50));
     }
 }
 

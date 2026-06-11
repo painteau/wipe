@@ -7,7 +7,7 @@ use ratatui::{
 };
 use crate::slot::{SlotState, WipeProgress, DiskInfo, fmt_bytes, fmt_duration};
 
-const VERSION: &str = "2.0.0";
+const VERSION: &str = "2.1.0";
 const COLS: usize = 10;
 const ROWS: usize = 10;
 
@@ -31,7 +31,7 @@ pub fn render(frame: &mut Frame, states: &[SlotState]) {
 fn render_header(frame: &mut Frame, area: Rect) {
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
     let line = Line::from(Span::styled(
-        format!("  WIPE STATION v{}  |  {}  |  [q] quitter", VERSION, now),
+        format!("  WIPE STATION v{}  |  {}  |  [2 boutons 10s = reboot]", VERSION, now),
         Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
     ));
     frame.render_widget(
@@ -183,11 +183,11 @@ fn defrag_grid(done: usize, total: usize, done_color: Color, frontier_color: Col
         for col in 0..COLS {
             let idx = row * COLS + col;
             let (ch, color) = if idx < done {
-                ("\u{2588}\u{2588}", done_color)        // ██ plein
+                ("\u{2588}\u{2588}", done_color)
             } else if idx == done && done < total {
-                ("\u{2588}\u{2588}", frontier_color)    // ██ frontier cyan
+                ("\u{2588}\u{2588}", frontier_color)
             } else {
-                ("\u{2591}\u{2591}", Color::DarkGray)  // ░░ vide
+                ("\u{2591}\u{2591}", Color::DarkGray)
             };
             spans.push(Span::styled(ch, Style::default().fg(color)));
             spans.push(Span::raw(" "));
