@@ -94,45 +94,29 @@ A full-screen terminal interface built with [ratatui](https://github.com/ratatui
 
 ### Installation
 
-Download the pre-built ARM64 binary from the latest release:
+On a fresh Raspberry Pi, run the setup script. It handles everything: system update, dependencies, binary download, SHA256 verification, systemd service, screen blanking, and reboots automatically.
 
 ```bash
-curl -fsSL https://github.com/painteau/wipe/releases/latest/download/wipe-station \
-  -o /usr/local/bin/wipe-station
-curl -fsSL https://github.com/painteau/wipe/releases/latest/download/wipe-station.sha256 \
-  -o /tmp/wipe-station.sha256
-
-sha256sum -c /tmp/wipe-station.sha256
-chmod +x /usr/local/bin/wipe-station
-
-sudo wipe-station
+curl -fsSL https://raw.githubusercontent.com/painteau/wipe/main/station-rust/setup.sh | sudo bash
 ```
 
-### Run as a systemd service
+What the script does:
 
-```ini
-[Unit]
-Description=Wipe Station TUI
-After=multi-user.target
+1. `apt update && apt upgrade`
+2. Installs `curl`, `sudo`, `udev`, `util-linux`
+3. Downloads the ARM64 binary and verifies its SHA256
+4. Installs it to `/usr/local/bin/wipe-station`
+5. Disables screen blanking (`consoleblank=0` in kernel cmdline)
+6. Creates and enables the systemd service on `/dev/tty1`
+7. Reboots
 
-[Service]
-ExecStart=/usr/local/bin/wipe-station
-Restart=always
-StandardInput=tty
-StandardOutput=tty
-TTYPath=/dev/tty1
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable --now wipe-station
-```
+After reboot, the station starts automatically on boot. Logs: `journalctl -u wipe-station -f`
 
 ### Auto-update
 
 On startup, the station fetches `station-rust/VERSION` from GitHub. If a newer version is available, it downloads the binary, verifies the SHA256 checksum, and re-executes itself automatically.
+
+To re-run setup after an OS reinstall or hardware change, just run the one-liner again.
 
 ### Build from source
 
