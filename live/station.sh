@@ -4,7 +4,7 @@
 
 STATION_URL="https://raw.githubusercontent.com/painteau/wipe/main/live/station.sh"
 STATION_BIN="/usr/local/bin/wipe-station.sh"
-UPDATE_TIMEOUT=5   # seconds before giving up on network
+UPDATE_TIMEOUT=7   # seconds before giving up on network
 
 # GPIO pins (BCM numbering)
 GPIO_BTN_SLOT1=17   # Physical pin 11
@@ -38,7 +38,6 @@ self_update() {
     local tmp
     tmp=$(mktemp)
 
-    # Fetch with hard timeout
     curl -fsSL --max-time "$UPDATE_TIMEOUT" "$STATION_URL" -o "$tmp" 2>/dev/null
     local CURL_EXIT=$?
 
@@ -114,14 +113,12 @@ wipe_slot() {
         echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
 
-        # Wait for disk
         if [ ! -b "$DEV" ]; then
             echo -e "  ${DIM}Waiting for disk on $DEV...${NC}"
             while [ ! -b "$DEV" ]; do sleep 1; done
             sleep 1
         fi
 
-        # Check rotational
         DEV_NAME=$(basename "$DEV")
         ROTATIONAL=$(cat "/sys/block/${DEV_NAME}/queue/rotational" 2>/dev/null)
         if [ "$ROTATIONAL" != "1" ]; then
@@ -131,7 +128,6 @@ wipe_slot() {
             continue
         fi
 
-        # Display disk info
         local SERIAL MODEL SIZE BYTES ETA
         SERIAL=$(disk_serial "$DEV")
         MODEL=$(disk_model "$DEV")
