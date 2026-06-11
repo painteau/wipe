@@ -4,7 +4,7 @@ use sha2::{Sha256, Digest};
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const VERSION_URL: &str =
-    "https://raw.githubusercontent.com/painteau/wipe/main/station-rust/VERSION";
+    "https://raw.githubusercontent.com/painteau/wipe/main/station/VERSION";
 const BINARY_URL: &str =
     "https://github.com/painteau/wipe/releases/latest/download/wipe-station";
 const SHA256_URL: &str =

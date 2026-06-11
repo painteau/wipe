@@ -97,7 +97,7 @@ A full-screen terminal interface built with [ratatui](https://github.com/ratatui
 On a fresh Raspberry Pi, run the setup script. It handles everything: system update, dependencies, binary download, SHA256 verification, systemd service, screen blanking, and reboots automatically.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/painteau/wipe/main/station-rust/setup.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/painteau/wipe/main/station/setup.sh | sudo bash
 ```
 
 What the script does:

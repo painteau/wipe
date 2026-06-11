@@ -1,4 +1,4 @@
-﻿name: Release wipe-station
+name: Release wipe-station
 
 on:
   push:
@@ -28,25 +28,25 @@ jobs:
       - name: Cross-linker
         run: sudo apt-get install -y gcc-aarch64-linux-gnu
 
-      - name: Verifier VERSION == tag
+      - name: Verify VERSION == tag
         if: github.event_name == 'push'
         run: |
           TAG=${{ github.ref_name }}
-          VERSION=$(cat station-rust/VERSION | tr -d '[:space:]')
+          VERSION=$(cat station/VERSION | tr -d '[:space:]')
           if [ "v${VERSION}" != "${TAG}" ]; then
-            echo "ERREUR: station-rust/VERSION (${VERSION}) != tag (${TAG})"
+            echo "ERREUR: station/VERSION (${VERSION}) != tag (${TAG})"
             exit 1
           fi
 
       - name: Build ARM64
-        working-directory: station-rust
+        working-directory: station
         run: cargo build --release --target aarch64-unknown-linux-gnu
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
-      - name: Preparer artefacts
+      - name: Prepare artifacts
         run: |
-          cp station-rust/target/aarch64-unknown-linux-gnu/release/wipe-station ./wipe-station
+          cp station/target/aarch64-unknown-linux-gnu/release/wipe-station ./wipe-station
           sha256sum wipe-station | awk '{print $1"  wipe-station"}' > wipe-station.sha256
           cat wipe-station.sha256
           ls -lh wipe-station
