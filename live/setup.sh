@@ -7,6 +7,7 @@ set -e
 STATION_URL="https://raw.githubusercontent.com/painteau/wipe/main/live/station.sh"
 STATION_BIN="/usr/local/bin/wipe-station.sh"
 SERVICE_FILE="/etc/systemd/system/wipe-station.service"
+UDEV_RULE="/etc/udev/rules.d/99-wipe-no-automount.rules"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -32,6 +33,24 @@ apt-get install -y --no-install-recommends \
     python3-gpiozero \
     python3-pigpio \
     pigpio
+
+# --- Disable udisks2 (automount daemon)
+echo -e "${YELLOW}[~] Disabling udisks2 automount...${NC}"
+systemctl stop udisks2 2>/dev/null || true
+systemctl disable udisks2 2>/dev/null || true
+systemctl mask udisks2 2>/dev/null || true
+
+# --- udev rule: block automount on all USB block devices
+echo -e "${YELLOW}[~] Installing udev no-automount rule...${NC}"
+cat > "$UDEV_RULE" << 'EOF'
+# Wipe station — never automount USB storage
+# Prevents udisks2, udiskie, or any automounter from mounting plugged drives.
+SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{UDISKS_AUTO}="0", ENV{UDISKS_IGNORE}="1"
+SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{UDISKS_PRESENTATION_HIDE}="1"
+EOF
+
+udevadm control --reload-rules
+udevadm trigger --subsystem-match=block
 
 # --- Download station.sh
 echo -e "${YELLOW}[~] Downloading station.sh...${NC}"
@@ -78,5 +97,8 @@ systemctl daemon-reload
 systemctl enable pigpiod
 systemctl start pigpiod
 
+echo ""
 echo -e "${GREEN}[✓] Setup complete.${NC}"
+echo -e "${DIM}  udisks2 masked — USB disks never auto-mounted.${NC}"
+echo -e "${DIM}  udev rule: ${UDEV_RULE}${NC}"
 echo -e "${GREEN}[✓] Reboot to start the station: reboot${NC}"
