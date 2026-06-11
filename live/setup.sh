@@ -9,6 +9,8 @@ STATION_BIN="/usr/local/bin/wipe-station.sh"
 SERVICE_FILE="/etc/systemd/system/wipe-station.service"
 UDEV_RULE="/etc/udev/rules.d/99-wipe-no-automount.rules"
 USBGUARD_RULES="/etc/usbguard/rules.conf"
+STATION_USER="wipestation"
+LOG_FILE="/var/log/wipe-station.log"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -36,7 +38,36 @@ apt-get install -y --no-install-recommends \
     python3-pigpio \
     pigpio \
     usbguard \
-    uhubctl
+    uhubctl \
+    sudo
+
+# --- Create dedicated user
+echo -e "${YELLOW}[~] Creating user '${STATION_USER}'...${NC}"
+if ! id "$STATION_USER" &>/dev/null; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin "$STATION_USER"
+fi
+
+# Groups needed:
+#   disk    — read/write access to /dev/sda, /dev/sdb (block devices)
+#   tty     — access to /dev/tty1 (HDMI display)
+#   gpio    — access to GPIO pins via pigpiod
+#   video   — framebuffer access
+#   plugdev — USB device events
+for GROUP in disk tty gpio video plugdev; do
+    getent group "$GROUP" &>/dev/null && usermod -aG "$GROUP" "$STATION_USER" || true
+done
+
+# sudoers: only allow umount (needed to unmount partitions before dd)
+echo -e "${YELLOW}[~] Configuring sudoers...${NC}"
+cat > /etc/sudoers.d/wipestation << EOF
+# Wipe station — allow umount only, no password
+${STATION_USER} ALL=(root) NOPASSWD: /bin/umount, /sbin/umount
+EOF
+chmod 440 /etc/sudoers.d/wipestation
+
+# Log file owned by station user
+touch "$LOG_FILE"
+chown "$STATION_USER":"$STATION_USER" "$LOG_FILE"
 
 # --- Disable udisks2 (automount daemon)
 echo -e "${YELLOW}[~] Disabling udisks2 automount...${NC}"
@@ -56,22 +87,17 @@ udevadm control --reload-rules
 udevadm trigger --subsystem-match=block
 
 # --- USBGuard: allow USB hubs + storage only, block everything else
-# Protects against BadUSB, Rubber Ducky, HID injection, rogue devices.
 echo -e "${YELLOW}[~] Configuring USBGuard (storage only)...${NC}"
 mkdir -p /etc/usbguard
 
 cat > "$USBGUARD_RULES" << 'EOF'
 # Wipe station USB policy
-# Allow USB hubs (needed for multi-port docks)
 allow with-interface equals { 09:00:00 }
-# Allow USB mass storage (HDD/SSD docks)
 allow with-interface equals { 08:*:* }
-# Block everything else (HID, network, serial, BadUSB...)
 block
 EOF
 
-# Apply USBGuard config: enforce policy on connect
-cat > /etc/usbguard/usbguard-daemon.conf << 'EOF'
+cat > /etc/usbguard/usbguard-daemon.conf << EOF
 RuleFile=/etc/usbguard/rules.conf
 ImplicitPolicyTarget=block
 PresentDevicePolicy=apply-policy
@@ -79,7 +105,7 @@ PresentControllerPolicy=keep
 InsertedDevicePolicy=apply-policy
 RestoreControllerDeviceState=false
 DeviceManagerBackend=uevent
-IPCAllowedUsers=root
+IPCAllowedUsers=root ${STATION_USER}
 IPCAllowedGroups=root
 DeviceRulesWithPort=false
 EOF
@@ -87,7 +113,7 @@ EOF
 systemctl enable usbguard
 systemctl start usbguard || true
 
-# --- Enable SSH for remote maintenance (no USB keyboard needed)
+# --- Enable SSH for remote maintenance
 echo -e "${YELLOW}[~] Enabling SSH...${NC}"
 systemctl enable ssh
 systemctl start ssh
@@ -96,18 +122,21 @@ systemctl start ssh
 echo -e "${YELLOW}[~] Downloading station.sh...${NC}"
 curl -fsSL "$STATION_URL" -o "$STATION_BIN"
 chmod +x "$STATION_BIN"
+chown "$STATION_USER":"$STATION_USER" "$STATION_BIN"
 
-# --- Systemd service
+# --- Systemd service (runs as wipestation, not root)
 echo -e "${YELLOW}[~] Creating systemd service...${NC}"
-cat > "$SERVICE_FILE" << 'EOF'
+cat > "$SERVICE_FILE" << EOF
 [Unit]
 Description=Wipe Station
-After=network-online.target usbguard.service
+After=network-online.target usbguard.service pigpiod.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/wipe-station.sh
+User=${STATION_USER}
+Group=${STATION_USER}
+ExecStart=${STATION_BIN}
 Restart=always
 RestartSec=5
 StandardInput=tty
@@ -123,12 +152,12 @@ EOF
 systemctl daemon-reload
 systemctl enable wipe-station.service
 
-# --- Auto-login on tty1
+# --- Auto-login on tty1 as wipestation
 mkdir -p /etc/systemd/system/getty@tty1.service.d
 cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf << EOF
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty --autologin root --noclear %I \$TERM
+ExecStart=-/sbin/agetty --autologin ${STATION_USER} --noclear %I \$TERM
 EOF
 
 systemctl daemon-reload
@@ -141,13 +170,13 @@ systemctl start pigpiod
 echo ""
 echo -e "${GREEN}[✓] Setup complete.${NC}"
 echo ""
-echo -e "  ${DIM}USB policy (USBGuard):${NC}"
-echo -e "  ${GREEN}  [+]${NC} ${DIM}USB hubs        — allowed${NC}"
-echo -e "  ${GREEN}  [+]${NC} ${DIM}USB storage      — allowed${NC}"
-echo -e "  ${RED}  [-]${NC} ${DIM}HID (clavier/souris/BadUSB) — blocked${NC}"
-echo -e "  ${RED}  [-]${NC} ${DIM}Tout autre périphérique     — blocked${NC}"
+echo -e "  ${DIM}Utilisateur  :${NC} ${STATION_USER} (pas root)"
+echo -e "  ${DIM}Groupes      :${NC} disk, tty, gpio, video, plugdev"
+echo -e "  ${DIM}sudo autorisé:${NC} umount uniquement"
 echo ""
-echo -e "  ${DIM}SSH activé pour maintenance à distance.${NC}"
-echo -e "  ${DIM}Trouver l'IP : hostname -I${NC}"
+echo -e "  ${DIM}USB autorisé :${NC} stockage + hubs"
+echo -e "  ${DIM}USB bloqué   :${NC} HID, BadUSB, tout autre"
+echo ""
+echo -e "  ${DIM}SSH activé — IP :${NC} $(hostname -I | awk '{print $1}')"
 echo ""
 echo -e "${GREEN}[✓] Reboot : reboot${NC}"
