@@ -1,10 +1,10 @@
 #!/bin/bash
 # setup.sh - Install wipe station on Raspberry Pi 4
-# Usage: curl -fsSL https://raw.githubusercontent.com/painteau/wipe/main/live/setup.sh | sudo bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/painteau/wipe/main/bash/setup.sh | sudo bash
 
 set -e
 
-STATION_URL="https://raw.githubusercontent.com/painteau/wipe/main/live/station.sh"
+STATION_URL="https://raw.githubusercontent.com/painteau/wipe/main/bash/station.sh"
 STATION_BIN="/usr/local/bin/wipe-station.sh"
 SERVICE_FILE="/etc/systemd/system/wipe-station.service"
 UDEV_RULE="/etc/udev/rules.d/99-wipe-no-automount.rules"

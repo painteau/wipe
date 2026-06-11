@@ -4,8 +4,8 @@
 
 VERSION="1.2.0"
 
-STATION_URL="https://raw.githubusercontent.com/painteau/wipe/main/live/station.sh"
-STATION_SHA256_URL="https://raw.githubusercontent.com/painteau/wipe/main/live/station.sh.sha256"
+STATION_URL="https://raw.githubusercontent.com/painteau/wipe/main/bash/station.sh"
+STATION_SHA256_URL="https://raw.githubusercontent.com/painteau/wipe/main/bash/station.sh.sha256"
 STATION_BIN="/usr/local/bin/wipe-station.sh"
 UPDATE_TIMEOUT=7
 LOG_FILE="/var/log/wipe-station.log"

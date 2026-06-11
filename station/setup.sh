@@ -3,7 +3,7 @@ set -euo pipefail
 
 # =============================================================================
 # WIPE STATION - Raspberry Pi setup
-# Usage: curl -fsSL https://raw.githubusercontent.com/painteau/wipe/main/station-rust/setup.sh | sudo bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/painteau/wipe/main/station/setup.sh | sudo bash
 # =============================================================================
 
 RED='\033[0;31m'
