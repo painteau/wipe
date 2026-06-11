@@ -236,12 +236,30 @@ fn read_disk_info(dev: &str) -> Result<DiskInfo, String> {
     })
 }
 
+/// Retourne true = wipe demarre (appui court relache < 3s).
+/// Ignore un appui long sans relachement (geste reboot watchdog).
 fn wait_button(gpio_pin: u8, dev: &str) -> bool {
     loop {
         if !is_block_device(dev) { return false; }
         if read_pin_low(gpio_pin) {
+            let press_start = Instant::now();
+            // Debounce
             thread::sleep(Duration::from_millis(50));
-            if read_pin_low(gpio_pin) { return true; }
+            if !read_pin_low(gpio_pin) { continue; }
+            // Attendre relachement ou timeout reboot
+            loop {
+                if !read_pin_low(gpio_pin) {
+                    // Relache : appui court = lancer wipe
+                    return true;
+                }
+                if press_start.elapsed() > Duration::from_secs(3) {
+                    // Tenu trop longtemps = geste reboot, ignorer
+                    // Attendre fin du maintien avant de reboucler
+                    while read_pin_low(gpio_pin) { thread::sleep(Duration::from_millis(50)); }
+                    break;
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
         }
         thread::sleep(Duration::from_millis(50));
     }
