@@ -3,12 +3,12 @@
 > Zero-wipe utility for rotational HDDs. Two modes: a bash script for quick use and a Rust TUI station designed for a Raspberry Pi kiosk with a 2-bay SATA dock.
 
 ```
- ██╗    ██╗██╗██████╗ ██████╗
- ██║    ██║██║██╔════╝██╔════╝
- ██║ █╗ ██║██║█████╗  ██║  ███╗
- ██║███╗██║██║██╔══╝  ██║   ██║
- ╚███╔███╔╝██║███████╗╚██████╔╝
-  ╚══╝╚══╝ ╚═╝╚══════╝ ╚═════╝
+  ██╗    ██╗██╗██████╗ ███████╗
+  ██║    ██║██║██╔══██╗██╔════╝
+  ██║ █╗ ██║██║██████╔╝█████╗
+  ██║███╗██║██║██╔═══╝ ██╔══╝
+  ╚███╔███╔╝██║██║     ███████╗
+   ╚══╝╚══╝ ╚═╝╚═╝     ╚══════╝
 ```
 
 **Automatically skips SSDs, NVMe, USB flash drives, and the live boot disk.**
