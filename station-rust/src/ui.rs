@@ -30,15 +30,14 @@ pub fn render(frame: &mut Frame, states: &[SlotState]) {
 
 fn render_header(frame: &mut Frame, area: Rect) {
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-    let line = Line::from(vec![
-        Span::styled(
-            format!("  WIPE STATION v{}  |  {}  |  [q] quitter", VERSION, now),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        ),
-    ]);
+    let line = Line::from(Span::styled(
+        format!("  WIPE STATION v{}  |  {}  |  [q] quitter", VERSION, now),
+        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+    ));
     frame.render_widget(
-        Paragraph::new(line).block(Block::default().borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan))),
+        Paragraph::new(line).block(
+            Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Cyan))
+        ),
         area,
     );
 }
@@ -46,12 +45,12 @@ fn render_header(frame: &mut Frame, area: Rect) {
 fn render_slot(frame: &mut Frame, area: Rect, id: usize, state: &SlotState) {
     let label = format!(" SLOT {} ", id);
     let (color, lines): (Color, Vec<Line<'static>>) = match state {
-        SlotState::WaitingForDisk => (Color::DarkGray, lines_waiting()),
-        SlotState::SsdRejected { model } => (Color::Red, lines_ssd(model)),
-        SlotState::Ready(info) => (Color::Yellow, lines_ready(info)),
+        SlotState::WaitingForDisk       => (Color::DarkGray, lines_waiting()),
+        SlotState::SsdRejected { model } => (Color::Red,      lines_ssd(model)),
+        SlotState::Ready(info)           => (Color::Yellow,   lines_ready(info)),
         SlotState::Wiping { info, progress } => (Color::Cyan, lines_wiping(info, progress)),
         SlotState::Done { info, elapsed_secs } => (Color::Green, lines_done(info, *elapsed_secs)),
-        SlotState::Error { message } => (Color::Red, lines_error(message)),
+        SlotState::Error { message }     => (Color::Red,      lines_error(message)),
     };
     let block = Block::default()
         .title(Span::styled(label, Style::default().fg(color).add_modifier(Modifier::BOLD)))
@@ -184,15 +183,15 @@ fn defrag_grid(done: usize, total: usize, done_color: Color, frontier_color: Col
         for col in 0..COLS {
             let idx = row * COLS + col;
             let (ch, color) = if idx < done {
-                ("##", done_color)
+                ("\u{2588}\u{2588}", done_color)        // ██ plein
             } else if idx == done && done < total {
-                ("##", frontier_color)
+                ("\u{2588}\u{2588}", frontier_color)    // ██ frontier cyan
             } else {
-                ("..", Color::DarkGray)
+                ("\u{2591}\u{2591}", Color::DarkGray)  // ░░ vide
             };
             spans.push(Span::styled(ch, Style::default().fg(color)));
             spans.push(Span::raw(" "));
-        };
+        }
         Line::from(spans)
     }).collect()
 }

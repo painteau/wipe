@@ -1,5 +1,6 @@
 mod slot;
 mod ui;
+mod update;
 mod wipe;
 
 use std::time::Duration;
@@ -12,6 +13,9 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use slot::SlotHandle;
 
 fn main() -> anyhow::Result<()> {
+    // Self-update avant TUI (affiche splash sur stdout normal)
+    update::check_and_update();
+
     enable_raw_mode()?;
     execute!(std::io::stdout(), EnterAlternateScreen)?;
 
